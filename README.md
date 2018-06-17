@@ -1,5 +1,7 @@
 # metar
 
+NOTE: This is a toy project exploring streaming (via conduit), seeding (via quickCheck) and parsing (via megaparsec).
+
 A METAR report is a loose international semi-standard used by airports for reporting information about wind speeds, humidity, and weather conditions. This program parses a subset of these reports from a stream and keeps some running aggregates.
 
 ## Format
