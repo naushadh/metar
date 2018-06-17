@@ -83,7 +83,27 @@ FR 110232Z 001100G12MPS
   $ stack build --pedantic
   ```
 
+- Test
+  ```bash
+  $ stack test --pedantic
+  ```
+
 - Run
   ```bash
   $ stack exec -- metar [ARGS]
+  ```
+
+## Usage
+
+- Find available options and flags
+  ```bash
+  $ stack exec -- metar --help
+  ```
+- Seed `/tmp/test.txt` with randomly generated 1234567890 records
+  ```bash
+  $ stack exec -- metar --out /tmp/test.txt --limit 1234567890
+  ```
+- Parse `/tmp/test.txt` to find average wind speeds
+  ```bash
+  $ stack exec -- metar --in /tmp/test.txt
   ```

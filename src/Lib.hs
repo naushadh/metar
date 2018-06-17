@@ -178,14 +178,15 @@ parseUnitOfSpeed
 -- * Reporting
 
 -- | Acquire the last N speeds for every airport
+-- NOTE: we assume provided FilePath exists & is readable!
 pipeline :: FilePath -> Int -> IO MapAirportSpeed
 pipeline srcFP limit
   = C.runConduitRes
-   $ CC.sourceFile srcFP
+   $ CC.sourceFile srcFP -- TODO: add ability to provide pretty error messaging should this fail.
   .| CC.linesUnboundedAscii
   .| CC.map BSC.unpack
   .| CC.map (M.runParser parseMetar "")
-  .| takeRights
+  .| takeRights -- TODO: add ability to somehow report on the # and/or lines of bad records.
   .| CC.map (\m -> m { metarWind = (metarWind m) { windSpeed = speedToMPS . windSpeed . metarWind $ m } } )
   .| CC.foldl (boundAppend limit) mempty
 
@@ -204,7 +205,7 @@ boundAppend limit as m = Map.adjust go k (Map.insertWith (++) k mempty as)
     v = speedValue . windSpeed . metarWind $ m
     ms = Map.findWithDefault mempty k as
     append = (++ [v])
-    go = if length ms < limit then append else (append . tail)
+    go = if length ms <= limit then append else (append . tail)
 
 -- | average windspeed for an Airport
 averageSpeed :: [Natural] -> Float
@@ -254,7 +255,7 @@ seedToFile destFP limit
   .| CC.mapM (const $ liftIO mkMetars)
   .| CC.map (\ms -> L.intercalate "\n" $ fmap renderMetar ms)
   .| CC.map BSC.pack
-  .| CC.sinkFile destFP
+  .| CC.sinkFile destFP -- TODO: add pretty error message should writing to file fail.
   where
     chunkSize = 10000
     chunks = (limit `div` chunkSize)+1
@@ -269,7 +270,10 @@ instance Arbitrary.Arbitrary Metar where
     <*> Arbitrary.arbitrary
 
 instance Arbitrary.Arbitrary ICAO where
-  arbitrary = ICAO . T.pack <$> (Gen.listOf1 $ Gen.elements ['A'..'Z'])
+  arbitrary = ICAO . T.pack <$> (listOf $ Gen.elements ['A'..'Z'])
+    where
+      -- limited bounds to ensure test data has repeated names to verify averaging.
+      listOf a = Gen.choose (3,5) >>= \i -> Gen.vectorOf i a
 
 instance Arbitrary.Arbitrary Timestamp where
   arbitrary = Timestamp <$> Arbitrary.arbitrary
