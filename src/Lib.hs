@@ -11,6 +11,7 @@ module Lib
   -- * Printer(s)
   , renderMetar
   -- * Reporting
+  , MapAirportSpeed
   , pipeline
   , printReport
   , seedToFile
@@ -248,6 +249,7 @@ leftpad m xs = replicate (m - length ys) '0' ++ ys
 --------------------------------------------------------------------------------
 -- * Artbitrary instances for test data generation
 
+-- | Seed test data generated via quick-check into a file.
 seedToFile :: FilePath -> Int -> IO ()
 seedToFile destFP limit
   = C.runConduitRes
