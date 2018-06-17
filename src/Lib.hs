@@ -5,6 +5,8 @@ module Lib
   , ICAO(..)
   , Timestamp(..)
   , Wind(..)
+  , Speed(..)
+  , UnitOfSpeed(..)
   -- * Parser(s)
   , parseMetar
   -- * Printer(s)
@@ -38,6 +40,9 @@ data Metar = Metar
   , metarTimestamp :: Timestamp
   , metarWind :: Wind
   } deriving Show
+
+instance Eq Metar where
+  a == b = renderMetar a == renderMetar b
 
 -- | Render a 'Metar'
 renderMetar :: Metar -> String
@@ -105,7 +110,7 @@ renderWind :: Wind -> String
 renderWind (Wind d (Speed u v) g)
   = leftpad 3 (show d)
  ++ (if v > 99 then leftpad 3 (show v) else leftpad 2 (show v))
- ++ Maybe.maybe "" show g
+ ++ Maybe.maybe "" (\g' -> "G" ++ leftpad 2 (show g')) g
  ++ renderUnitOfSpeed u
 
 -- | Parse a 'Wind'

@@ -50,3 +50,7 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - metar
+    - tasty
+    - tasty-quickcheck
+    - QuickCheck
+    - quickcheck-instances
