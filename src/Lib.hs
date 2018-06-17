@@ -1,7 +1,6 @@
 module Lib
-  ( someFunc
-  -- * Types
-  , Metar(..)
+  (-- * Types
+    Metar(..)
   , ICAO(..)
   , Timestamp(..)
   , Wind(..)
@@ -11,6 +10,9 @@ module Lib
   , parseMetar
   -- * Printer(s)
   , renderMetar
+  -- * Reporting
+  , pipeline
+  , printReport
   ) where
 
 import qualified Data.Text as T
@@ -24,15 +26,15 @@ import qualified Control.Monad.Combinators as ParserCombinators
 import           Data.Void (Void)
 import           Control.Applicative ((<|>), optional)
 import qualified Data.Maybe as Maybe
-
-someFunc :: IO ()
-someFunc = putStrLn "someFunc"
+import           Data.Conduit ((.|))
+import qualified Data.Conduit as C
+import qualified Data.Conduit.Combinators as CC
+import qualified Data.Either as Either
+import qualified Data.Map as Map
+import qualified Data.ByteString.Char8 as BSC
 
 --------------------------------------------------------------------------------
--- * Types + Parsers
-
--- | Our humble string parser
-type Parser = M.Parsec Void String
+-- * Metar
 
 -- | A line from a METAR report
 data Metar = Metar
@@ -60,6 +62,9 @@ parseMetar = Metar <$> parseICAO <*> (parseSpace >> parseTimestamp) <*> (parseSp
     parseSpace :: Parser Char
     parseSpace = MC.char ' '
 
+--------------------------------------------------------------------------------
+-- * ICAO
+
 -- | International Civil Aviation Code.
 -- Ex: YYZ (for Toronto), LAX (Los Angeles), etc.
 newtype ICAO = ICAO { unICAO :: Text }
@@ -72,6 +77,9 @@ renderICAO (ICAO t) = T.unpack t
 -- | Parse an 'ICAO'
 parseICAO :: Parser ICAO
 parseICAO = ICAO . T.pack <$> ParserCombinators.some MC.upperChar
+
+--------------------------------------------------------------------------------
+-- * Timestamp
 
 -- | Simple wrapper over 'UTCTime' to allow adding custom parsing instances.
 -- NOTE: the year within is defaulted to the current year, the incoming feed DOES NOT tell us this.
@@ -97,6 +105,9 @@ parseTimestamp
     parseUTCTime pattern
       =   Time.parseTimeM False Time.defaultTimeLocale pattern
       =<< ParserCombinators.count (length pattern) MC.asciiChar
+
+--------------------------------------------------------------------------------
+-- * Wind
 
 -- | Wind info
 data Wind = Wind
@@ -130,12 +141,16 @@ parseWind = go <$> parseLine
 data Speed = Speed UnitOfSpeed Natural
   deriving Show
 
+-- | getter for 'Speed' magnitude
+speedValue :: Speed -> Natural
+speedValue (Speed _ v) = v
+
 -- | Normalize a speed to MPS
--- speedToMPS :: Speed -> Speed
--- speedToMPS (Speed u v) = Speed MPS (go u v)
---   where
---     go KT n = n `div` 2
---     go MPS n = n
+speedToMPS :: Speed -> Speed
+speedToMPS (Speed u v) = Speed MPS (go u v)
+  where
+    go KT n = n `div` 2
+    go MPS n = n
 
 -- | Unit of speed
 data UnitOfSpeed = KT | MPS
@@ -151,10 +166,69 @@ parseUnitOfSpeed
   =  (MC.string "KT" >> pure KT)
  <|> (MC.string "MPS" >> pure MPS)
 
+--------------------------------------------------------------------------------
+-- * Reporting
+
+-- | Acquire the last N speeds for every airport
+pipeline :: FilePath -> Int -> IO MapAirportSpeed
+pipeline srcFP limit
+  = C.runConduitRes
+   $ CC.sourceFile srcFP
+  .| CC.linesUnboundedAscii
+  .| CC.map BSC.unpack
+  .| CC.map (M.runParser parseMetar "")
+  .| takeRights
+  .| CC.map (\m -> m { metarWind = (metarWind m) { windSpeed = speedToMPS . windSpeed . metarWind $ m } } )
+  .| CC.foldl (boundAppend limit) mempty
+
+-- | just extract the right hand side
+takeRights :: Monad m => C.ConduitT (Either l r) r m ()
+takeRights = CC.filter Either.isRight .| CC.map (Either.fromRight (error "unexpected left!"))
+
+-- | Last N speeds per airport
+type MapAirportSpeed = Map.Map Text [Natural]
+
+-- | Append a Metar speed into the ICAO key, evict an older speed when limit is reached.
+boundAppend :: Int -> MapAirportSpeed -> Metar -> MapAirportSpeed
+boundAppend limit as m = Map.adjust go k (Map.insertWith (++) k mempty as)
+  where
+    k = unICAO . metarICAO $ m
+    v = speedValue . windSpeed . metarWind $ m
+    ms = Map.findWithDefault mempty k as
+    append = (++ [v])
+    go = if length ms < limit then append else (append . tail)
+
+-- | average windspeed for an Airport
+averageSpeed :: [Natural] -> Float
+averageSpeed xs = (fromIntegral $ sum xs) / (fromIntegral $ length xs)
+
+-- | current windspeed for an Airport
+-- NOTE: we rely on 'boundAppend' to ensure no empty keys are populated.
+currentSpeed :: [Natural] -> Natural
+currentSpeed = last
+
+-- | Print a report of the running average and current speeds per airport.
+printReport :: MapAirportSpeed -> IO ()
+printReport xs = header >> mapM_ (uncurry go) (Map.toList xs)
+  where
+    header = putStrLn "Airport,Average,Current"
+    go a ss
+      = putStrLn $ (T.unpack a)
+      ++ ","
+      ++ (show $ averageSpeed ss)
+      ++ ","
+      ++ (show $ currentSpeed ss)
+
+--------------------------------------------------------------------------------
+-- * Utils
+
 -- | Possible errors we can emit
 data Error
   = InvalidLine Natural Text -- ^ error parsing a line, line# and error message.
   deriving Show
+
+-- | Our humble string parser
+type Parser = M.Parsec Void String
 
 -- | Left pad a string with 0s
 -- Lifted from: https://stackoverflow.com/a/29153602

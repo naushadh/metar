@@ -25,6 +25,9 @@ dependencies:
 - time
 - parser-combinators
 - megaparsec
+- conduit
+- containers
+- bytestring
 
 library:
   source-dirs: src
