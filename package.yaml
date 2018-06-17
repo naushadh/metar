@@ -28,6 +28,8 @@ dependencies:
 - conduit
 - containers
 - bytestring
+- QuickCheck
+- quickcheck-instances
 
 library:
   source-dirs: src
@@ -42,6 +44,7 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - metar
+    - optparse-applicative
 
 tests:
   metar-test:
@@ -55,5 +58,3 @@ tests:
     - metar
     - tasty
     - tasty-quickcheck
-    - QuickCheck
-    - quickcheck-instances

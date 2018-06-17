@@ -13,6 +13,7 @@ module Lib
   -- * Reporting
   , pipeline
   , printReport
+  , seedToFile
   ) where
 
 import qualified Data.Text as T
@@ -29,9 +30,16 @@ import qualified Data.Maybe as Maybe
 import           Data.Conduit ((.|))
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Combinators as CC
+import qualified Data.Conduit.List as CL
 import qualified Data.Either as Either
 import qualified Data.Map as Map
 import qualified Data.ByteString.Char8 as BSC
+
+import qualified Test.QuickCheck.Arbitrary as Arbitrary
+import qualified Test.QuickCheck.Gen as Gen
+import           Test.QuickCheck.Instances.Time () -- instances for UTCTime
+import qualified Data.List as L
+import           Control.Monad.IO.Class (liftIO)
 
 --------------------------------------------------------------------------------
 -- * Metar
@@ -235,3 +243,49 @@ type Parser = M.Parsec Void String
 leftpad :: Int -> String -> String
 leftpad m xs = replicate (m - length ys) '0' ++ ys
   where ys = take m xs
+
+--------------------------------------------------------------------------------
+-- * Artbitrary instances for test data generation
+
+seedToFile :: FilePath -> Int -> IO ()
+seedToFile destFP limit
+  = C.runConduitRes
+   $ CL.sourceList [1..chunks]
+  .| CC.mapM (const $ liftIO mkMetars)
+  .| CC.map (\ms -> L.intercalate "\n" $ fmap renderMetar ms)
+  .| CC.map BSC.pack
+  .| CC.sinkFile destFP
+  where
+    chunkSize = 10000
+    chunks = (limit `div` chunkSize)+1
+    mkMetars :: IO [Metar]
+    mkMetars = Gen.generate $ Gen.vectorOf chunkSize Arbitrary.arbitrary
+
+instance Arbitrary.Arbitrary Metar where
+  arbitrary
+    = Metar
+    <$> Arbitrary.arbitrary
+    <*> Arbitrary.arbitrary
+    <*> Arbitrary.arbitrary
+
+instance Arbitrary.Arbitrary ICAO where
+  arbitrary = ICAO . T.pack <$> (Gen.listOf1 $ Gen.elements ['A'..'Z'])
+
+instance Arbitrary.Arbitrary Timestamp where
+  arbitrary = Timestamp <$> Arbitrary.arbitrary
+
+instance Arbitrary.Arbitrary Wind where
+  arbitrary
+    = Wind
+    <$> Arbitrary.arbitrarySizedNatural
+    <*> Arbitrary.arbitrary
+    <*> Arbitrary.liftArbitrary Arbitrary.arbitrarySizedNatural
+
+instance Arbitrary.Arbitrary Speed where
+  arbitrary
+    = Speed
+    <$> Arbitrary.arbitrary
+    <*> Arbitrary.arbitrarySizedNatural
+
+instance Arbitrary.Arbitrary UnitOfSpeed where
+  arbitrary = Gen.elements [ KT, MPS ]
