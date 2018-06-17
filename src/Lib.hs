@@ -7,6 +7,8 @@ module Lib
   , Wind(..)
   -- * Parser(s)
   , parseMetar
+  -- * Printer(s)
+  , renderMetar
   ) where
 
 import qualified Data.Text as T
@@ -19,12 +21,13 @@ import qualified Text.Megaparsec.Char as MC
 import qualified Control.Monad.Combinators as ParserCombinators
 import           Data.Void (Void)
 import           Control.Applicative ((<|>), optional)
+import qualified Data.Maybe as Maybe
 
 someFunc :: IO ()
 someFunc = putStrLn "someFunc"
 
 --------------------------------------------------------------------------------
--- * Types
+-- * Types + Parsers
 
 -- | Our humble string parser
 type Parser = M.Parsec Void String
@@ -35,6 +38,15 @@ data Metar = Metar
   , metarTimestamp :: Timestamp
   , metarWind :: Wind
   } deriving Show
+
+-- | Render a 'Metar'
+renderMetar :: Metar -> String
+renderMetar (Metar i t w)
+  = renderICAO i
+  ++ " "
+  ++ renderTimestamp t
+  ++ " "
+  ++ renderWind w
 
 -- | Parse a 'Metar'
 parseMetar :: Parser Metar
@@ -48,6 +60,10 @@ parseMetar = Metar <$> parseICAO <*> (parseSpace >> parseTimestamp) <*> (parseSp
 newtype ICAO = ICAO { unICAO :: Text }
   deriving Show
 
+-- | Render an 'ICAO'
+renderICAO :: ICAO -> String
+renderICAO (ICAO t) = T.unpack t
+
 -- | Parse an 'ICAO'
 parseICAO :: Parser ICAO
 parseICAO = ICAO . T.pack <$> ParserCombinators.some MC.upperChar
@@ -59,10 +75,18 @@ parseICAO = ICAO . T.pack <$> ParserCombinators.some MC.upperChar
 newtype Timestamp = Timestamp { unTimestamp :: UTCTime }
   deriving Show
 
+-- | Standard pattern for 'Timestamp'
+timestampPattern :: String
+timestampPattern = "%d%H%MZ"
+
+-- | Render a 'Timestamp'
+renderTimestamp :: Timestamp -> String
+renderTimestamp (Timestamp t) = Time.formatTime Time.defaultTimeLocale timestampPattern t
+
 -- | Parse a 'Timestamp'
 parseTimestamp :: Parser Timestamp
 parseTimestamp
-  = Timestamp <$> parseUTCTime "%d%H%MZ"
+  = Timestamp <$> parseUTCTime timestampPattern
   where
     parseUTCTime :: String -> Parser UTCTime
     parseUTCTime pattern
@@ -72,9 +96,17 @@ parseTimestamp
 -- | Wind info
 data Wind = Wind
   { windDirection :: Natural  -- ^ in degrees
-  , windSpeed :: Natural      -- ^ speed in MPS
+  , windSpeed :: Speed        -- ^ speed
   , windGusts :: Maybe Natural-- ^ gusts (if any)
   } deriving Show
+
+-- | Render 'Wind' info
+renderWind :: Wind -> String
+renderWind (Wind d (Speed u v) g)
+  = leftpad 3 (show d)
+ ++ (if v > 99 then leftpad 3 (show v) else leftpad 2 (show v))
+ ++ Maybe.maybe "" show g
+ ++ renderUnitOfSpeed u
 
 -- | Parse a 'Wind'
 parseWind :: Parser Wind
@@ -87,24 +119,40 @@ parseWind = go <$> parseLine
     parseGusts = MC.char 'G' >> parseNatural 2
     parseLine
       = ((,,,) <$> parseNatural 3 <*> (parseNatural' 2 3) <*> optional parseGusts <*> parseUnitOfSpeed)
-    go (d,s,g,u) = Wind d (speedToMPS u s) g
+    go (d,s,g,u) = Wind d (Speed u s) g
+
+-- | Speed with a unit
+data Speed = Speed UnitOfSpeed Natural
+  deriving Show
+
+-- | Normalize a speed to MPS
+-- speedToMPS :: Speed -> Speed
+-- speedToMPS (Speed u v) = Speed MPS (go u v)
+--   where
+--     go KT n = n `div` 2
+--     go MPS n = n
 
 -- | Unit of speed
-data UnitOfSpeed = Knot | MPS
+data UnitOfSpeed = KT | MPS
   deriving Show
+
+-- | Render a 'UnitOfSpeed'
+renderUnitOfSpeed :: UnitOfSpeed -> String
+renderUnitOfSpeed = show
 
 -- | Parse a 'UnitOfSpeed'
 parseUnitOfSpeed :: Parser UnitOfSpeed
 parseUnitOfSpeed
-  =  (MC.string "KT" >> pure Knot)
+  =  (MC.string "KT" >> pure KT)
  <|> (MC.string "MPS" >> pure MPS)
-
--- | Normalize a speed to MPS
-speedToMPS :: UnitOfSpeed -> Natural -> Natural
-speedToMPS Knot n = n `div` 2
-speedToMPS MPS n = n
 
 -- | Possible errors we can emit
 data Error
   = InvalidLine Natural Text -- ^ error parsing a line, line# and error message.
   deriving Show
+
+-- | Left pad a string with 0s
+-- Lifted from: https://stackoverflow.com/a/29153602
+leftpad :: Int -> String -> String
+leftpad m xs = replicate (m - length ys) '0' ++ ys
+  where ys = take m xs
